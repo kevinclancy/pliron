@@ -394,6 +394,7 @@ impl ToLLVMDialect for KalIfOp {
             ctx,
             pre_if_block,
             OpInsertionPoint::BeforeOperation(self.get_operation()),
+            Some("if_merge".try_into().unwrap()),
         );
 
         // Emit conditional branch in pre_if_block.
@@ -470,6 +471,7 @@ impl ToLLVMDialect for KalWhileOp {
             ctx,
             pre_while_block,
             OpInsertionPoint::BeforeOperation(self.get_operation()),
+            Some("while_exit".try_into().unwrap()),
         );
 
         // Create the header block.

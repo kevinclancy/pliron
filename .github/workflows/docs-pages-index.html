@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>pliron - Extensible Compiler IR</title>
+    <title>pliron</title>
     <style>
       * {
         margin: 0;
@@ -52,6 +52,30 @@
         max-width: 56rem;
         margin: 0 auto 3rem;
         line-height: 1.7;
+      }
+      .discord-banner {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.6rem;
+        padding: 0.55rem 0.95rem;
+        border-radius: 999px;
+        background: #eef2ff;
+        border: 1px solid #c7d2fe;
+        color: #3730a3;
+        text-decoration: none;
+        font-size: 0.9rem;
+        font-weight: 600;
+        transition: all 0.2s ease;
+      }
+      .discord-banner:hover {
+        background: #e0e7ff;
+        border-color: #a5b4fc;
+      }
+      .discord-dot {
+        width: 0.55rem;
+        height: 0.55rem;
+        border-radius: 999px;
+        background: #6366f1;
       }
       .categories {
         display: grid;
@@ -171,6 +195,13 @@
             </a>
           </div>
         </div>
+      </div>
+
+      <div style="text-align: center; margin-top: 2rem;">
+        <a href="https://discord.gg/5M3K4Ujv7v" class="discord-banner">
+          <span class="discord-dot"></span>
+          Join the pliron Discord community
+        </a>
       </div>
 
       <div style="text-align: center; margin-top: 4rem; padding-top: 2rem; border-top: 1px solid #e5e7eb;">
