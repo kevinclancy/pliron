@@ -123,7 +123,10 @@ fn add_op_fold_sum(operand_attrs: &[Option<AttrObj>]) -> Option<IntegerAttr> {
     };
     let lhs = lhs.downcast_ref::<IntegerAttr>()?;
     let rhs = rhs.downcast_ref::<IntegerAttr>()?;
-    Some(IntegerAttr::new(lhs.get_type(), lhs.value().add(&rhs.value())))
+    Some(IntegerAttr::new(
+        lhs.get_type(),
+        lhs.value().add(&rhs.value()),
+    ))
 }
 
 #[op_interface_impl]

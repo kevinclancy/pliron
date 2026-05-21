@@ -46,7 +46,9 @@ impl APInt {
             rhs.bw()
         );
         let mut value = self.value.clone();
-        value.add_(&rhs.value).expect("APInt::add: bitwidth mismatch");
+        value
+            .add_(&rhs.value)
+            .expect("APInt::add: bitwidth mismatch");
         APInt { value }
     }
 

@@ -3,10 +3,28 @@ use rustc_hash::FxHashMap;
 use thiserror::Error;
 
 use crate::{
-    attribute::AttrObj, basic_block::BasicBlock, builtin::{
+    attribute::AttrObj,
+    basic_block::BasicBlock,
+    builtin::{
         attributes::{OperandSegmentSizesAttr, TypeAttr},
         type_interfaces::FunctionTypeInterface,
-    }, context::{Context, Ptr}, dict_key, graph::walkers::interruptible::{WalkResult, walk_advance, walk_break}, identifier::Identifier, irbuild::{IRStatus, fold_rewriter::FoldRewriter}, linked_list::ContainsLinkedList, location::{Located, Location}, op::{Op, op_cast}, operation::Operation, printable::Printable, region::Region, result::Result, symbol_table::{SymbolTableCollection, walk_symbol_table}, r#type::{Type, TypeObj, Typed, type_impls}, value::Value, verify_err, verify_error
+    },
+    context::{Context, Ptr},
+    dict_key,
+    graph::walkers::interruptible::{WalkResult, walk_advance, walk_break},
+    identifier::Identifier,
+    irbuild::{IRStatus, fold_rewriter::FoldRewriter},
+    linked_list::ContainsLinkedList,
+    location::{Located, Location},
+    op::{Op, op_cast},
+    operation::Operation,
+    printable::Printable,
+    region::Region,
+    result::Result,
+    symbol_table::{SymbolTableCollection, walk_symbol_table},
+    r#type::{Type, TypeObj, Typed, type_impls},
+    value::Value,
+    verify_err, verify_error,
 };
 
 use super::attributes::IdentifierAttr;

@@ -2,11 +2,7 @@ use std::marker::PhantomData;
 
 use crate::{
     context::{Context, Ptr},
-    irbuild::{
-        inserter::OpInsertionPoint,
-        listener::RewriteListener,
-        rewriter::Rewriter,
-    },
+    irbuild::{inserter::OpInsertionPoint, listener::RewriteListener, rewriter::Rewriter},
     operation::Operation,
     value::Value,
 };
@@ -31,12 +27,7 @@ pub trait FoldRewriter {
 
     /// Replace an [Operation] (and delete it) with another operation.
     /// Results of the new operation must match the results of the old operation.
-    fn replace_operation(
-        &mut self,
-        ctx: &mut Context,
-        op: Ptr<Operation>,
-        new_op: Ptr<Operation>,
-    );
+    fn replace_operation(&mut self, ctx: &mut Context, op: Ptr<Operation>, new_op: Ptr<Operation>);
 
     /// Replace an [Operation] (and delete it) with a list of values.
     /// Results of the new operation must match the list of values.
@@ -86,12 +77,7 @@ impl<'a, L: RewriteListener, R: Rewriter<L>> FoldRewriter for FoldRewriterAdapte
         self.rewriter.get_insertion_point()
     }
 
-    fn replace_operation(
-        &mut self,
-        ctx: &mut Context,
-        op: Ptr<Operation>,
-        new_op: Ptr<Operation>,
-    ) {
+    fn replace_operation(&mut self, ctx: &mut Context, op: Ptr<Operation>, new_op: Ptr<Operation>) {
         self.rewriter.replace_operation(ctx, op, new_op)
     }
 
@@ -101,11 +87,13 @@ impl<'a, L: RewriteListener, R: Rewriter<L>> FoldRewriter for FoldRewriterAdapte
         op: Ptr<Operation>,
         new_values: Vec<Value>,
     ) {
-        self.rewriter.replace_operation_with_values(ctx, op, new_values)
+        self.rewriter
+            .replace_operation_with_values(ctx, op, new_values)
     }
 
     fn replace_value_uses_with(&mut self, ctx: &Context, old_value: Value, new_value: Value) {
-        self.rewriter.replace_value_uses_with(ctx, old_value, new_value)
+        self.rewriter
+            .replace_value_uses_with(ctx, old_value, new_value)
     }
 
     fn erase_operation(&mut self, ctx: &mut Context, op: Ptr<Operation>) {
