@@ -35,6 +35,7 @@ use pliron::{
     context::{Context, Ptr},
     derive::op_interface_impl,
     irbuild::{
+        IRStatus,
         dialect_conversion::{
             DialectConversion, DialectConversionRewriter, OperandsInfo, apply_dialect_conversion,
         },
@@ -104,7 +105,7 @@ impl DialectConversion for KalToLLVM {
 ///
 /// Uses the [`DialectConversion`] infrastructure: each Kaleidoscope op
 /// implements [`ToLLVMDialect`] and knows how to lower itself to LLVM ops.
-pub fn lower_module(ctx: &mut Context, module: ModuleOp) -> Result<()> {
+pub fn lower_module(ctx: &mut Context, module: ModuleOp) -> Result<IRStatus> {
     apply_dialect_conversion(ctx, &mut KalToLLVM, module.get_operation())
 }
 // ANCHOR_END: lower_module
