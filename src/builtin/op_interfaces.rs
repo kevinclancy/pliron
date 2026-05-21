@@ -3,26 +3,10 @@ use rustc_hash::FxHashMap;
 use thiserror::Error;
 
 use crate::{
-    basic_block::BasicBlock,
-    builtin::{
+    attribute::AttrObj, basic_block::BasicBlock, builtin::{
         attributes::{OperandSegmentSizesAttr, TypeAttr},
         type_interfaces::FunctionTypeInterface,
-    },
-    context::{Context, Ptr},
-    dict_key,
-    graph::walkers::interruptible::{WalkResult, walk_advance, walk_break},
-    identifier::Identifier,
-    linked_list::ContainsLinkedList,
-    location::{Located, Location},
-    op::{Op, op_cast},
-    operation::Operation,
-    printable::Printable,
-    region::Region,
-    result::Result,
-    symbol_table::{SymbolTableCollection, walk_symbol_table},
-    r#type::{Type, TypeObj, Typed, type_impls},
-    value::Value,
-    verify_err, verify_error,
+    }, context::{Context, Ptr}, dict_key, graph::walkers::interruptible::{WalkResult, walk_advance, walk_break}, identifier::Identifier, irbuild::{IRStatus, fold_rewriter::FoldRewriter}, linked_list::ContainsLinkedList, location::{Located, Location}, op::{Op, op_cast}, operation::Operation, printable::Printable, region::Region, result::Result, symbol_table::{SymbolTableCollection, walk_symbol_table}, r#type::{Type, TypeObj, Typed, type_impls}, value::Value, verify_err, verify_error
 };
 
 use super::attributes::IdentifierAttr;
@@ -614,6 +598,34 @@ pub trait SymbolUserOpInterface {
     fn used_symbols(&self, ctx: &Context) -> Vec<Identifier>;
 
     /// Nothing (by default) to verify for symbol users. Override if needed.
+    fn verify(_op: &dyn Op, _ctx: &Context) -> Result<()>
+    where
+        Self: Sized,
+    {
+        Ok(())
+    }
+}
+
+#[op_interface]
+pub trait ConstFoldInterface {
+    /// Takes a slice `operand_attrs` containing `Some(attr)`` at position `i` if operand `i` is a compile-time
+    /// constant (where `attr` contains the constant value) and `None` at position `i` otherwise.
+    /// Produces a similar vector whose elements convey whether each of this operations's results
+    /// are known compile-time constants.
+    fn check_fold(&self, ctx: &Context, operand_attrs: &[Option<AttrObj>]) -> Vec<Option<AttrObj>>;
+
+    /// Takes a slice `operand_attrs` containing `Some(attr)` at position `i` if operand `i` is a compile-time
+    /// constant (where `attr` contains the constant value) and `None` at position `i` otherwise.
+    /// Uses this knowledge to rewrite this operation into a cheaper form.
+    /// (E.g., perform compile-time arithmetic on compile-time constants,
+    /// rewriting the add op to a constant op).
+    fn fold_in_place(
+        &self,
+        ctx: &mut Context,
+        operand_attrs: &[Option<AttrObj>],
+        rewriter: &mut dyn FoldRewriter,
+    ) -> IRStatus;
+
     fn verify(_op: &dyn Op, _ctx: &Context) -> Result<()>
     where
         Self: Sized,
