@@ -3,12 +3,15 @@
 use pliron::{
     attribute::AttrObj,
     basic_block::BasicBlock,
-    builtin::{attributes::IntegerAttr, op_interfaces::ConstFoldInterface},
+    builtin::attributes::IntegerAttr,
     context::{Context, Ptr},
     derive::op_interface_impl,
-    irbuild::{IRStatus, fold_rewriter::FoldRewriter, inserter::OpInsertionPoint},
+    irbuild::{IRStatus, inserter::OpInsertionPoint, rewriter::Rewriter},
     op::Op,
-    opts::dce::{BlockArgRemoval, SideEffects},
+    opts::{
+        constants::ConstFoldInterface,
+        dce::{BlockArgRemoval, SideEffects},
+    },
 };
 
 use crate::ops::{
@@ -109,7 +112,7 @@ impl ConstFoldInterface for ConstantOp {
         &self,
         _ctx: &mut Context,
         _operand_attrs: &[Option<AttrObj>],
-        _rewriter: &mut dyn FoldRewriter,
+        _rewriter: &mut dyn Rewriter,
     ) -> IRStatus {
         IRStatus::Unchanged
     }
@@ -143,7 +146,7 @@ impl ConstFoldInterface for AddOp {
         &self,
         ctx: &mut Context,
         operand_attrs: &[Option<AttrObj>],
-        rewriter: &mut dyn FoldRewriter,
+        rewriter: &mut dyn Rewriter,
     ) -> IRStatus {
         let Some(sum) = add_op_fold_sum(operand_attrs) else {
             return IRStatus::Unchanged;
