@@ -9,8 +9,8 @@ use pliron::{
     irbuild::{IRStatus, rewriter::Rewriter},
     op::Op,
     opts::{
-        constants::ConstFoldInterface,
         dce::{BlockArgRemoval, SideEffects},
+        sccp::ConstFoldInterface,
     },
     utils::apint::APInt,
 };

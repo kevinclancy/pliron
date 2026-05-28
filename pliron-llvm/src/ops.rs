@@ -622,6 +622,14 @@ pub struct BrOp;
 
 #[op_interface_impl]
 impl BranchOpInterface for BrOp {
+    fn successor_blocks(
+        &self,
+        ctx: &Context,
+        _operands: &[Option<AttrObj>],
+    ) -> Vec<Ptr<BasicBlock>> {
+        self.get_operation().deref(ctx).successors().collect()
+    }
+
     fn successor_operands(&self, ctx: &Context, succ_idx: usize) -> Vec<Value> {
         assert!(succ_idx == 0, "BrOp has exactly one successor");
         self.get_operation().deref(ctx).operands().collect()
@@ -830,6 +838,23 @@ impl Parsable for CondBrOp {
 
 #[op_interface_impl]
 impl BranchOpInterface for CondBrOp {
+    fn successor_blocks(
+        &self,
+        ctx: &Context,
+        operands: &[Option<AttrObj>],
+    ) -> Vec<Ptr<BasicBlock>> {
+        let successors: Vec<Ptr<BasicBlock>> =
+            self.get_operation().deref(ctx).successors().collect();
+        let Some(cond_attr) = operands.first().and_then(|o| o.as_ref()) else {
+            return successors;
+        };
+        let cond_int = cond_attr
+            .downcast_ref::<IntegerAttr>()
+            .expect("CondBrOp condition operand must be an IntegerAttr");
+        let taken = if cond_int.value().is_zero() { 1 } else { 0 };
+        vec![successors[taken]]
+    }
+
     fn successor_operands(&self, ctx: &Context, succ_idx: usize) -> Vec<Value> {
         assert!(
             succ_idx == 0 || succ_idx == 1,
@@ -861,7 +886,7 @@ impl BranchOpInterface for CondBrOp {
 /// ### Operands
 /// | operand | description |
 /// |-----|-------|
-/// | `condition` | 1-bit signless integer |
+/// | `condition` | integer (width matches the case values) |
 /// | `default_dest_opds` | variadic of any type |
 /// | `case_dest_opds` | variadic of any type |
 ///
@@ -1125,6 +1150,33 @@ impl SwitchOp {
 
 #[op_interface_impl]
 impl BranchOpInterface for SwitchOp {
+    fn successor_blocks(
+        &self,
+        ctx: &Context,
+        operands: &[Option<AttrObj>],
+    ) -> Vec<Ptr<BasicBlock>> {
+        let successors: Vec<Ptr<BasicBlock>> =
+            self.get_operation().deref(ctx).successors().collect();
+        let Some(cond_attr) = operands.first().and_then(|o| o.as_ref()) else {
+            return successors;
+        };
+        let cond_int = cond_attr
+            .downcast_ref::<IntegerAttr>()
+            .expect("Switch condition operand must be an IntegerAttr")
+            .value();
+        // Successor 0 is the default destination; successors 1..N correspond to case_values[0..N-1].
+        let case_values = self
+            .get_attr_switch_case_values(ctx)
+            .expect("SwitchOp missing case values attribute");
+        let taken = case_values
+            .0
+            .iter()
+            .position(|case| case.value() == cond_int)
+            .map(|i| i + 1)
+            .unwrap_or(0);
+        vec![successors[taken]]
+    }
+
     fn successor_operands(&self, ctx: &Context, succ_idx: usize) -> Vec<Value> {
         // Skip the first segment, which is the condition.
         self.get_segment(ctx, succ_idx + 1)
