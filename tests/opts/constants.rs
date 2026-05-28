@@ -162,9 +162,7 @@ fn sccp_meets_distinct_constants_from_live_predecessors_as_unknown() -> Result<(
 
     let (status, _before, after) = run_sccp_on_text(input)?;
     assert_eq!(status, IRStatus::Changed);
-    // y_plus_y should have folded to <10: i64>.
     assert!(after.contains("<10: i64>"));
-    // x_plus_y must still be present as an llvm.add (its lhs is Unknown).
     assert!(after.contains("llvm.add"));
     Ok(())
 }
@@ -191,8 +189,9 @@ fn sccp_is_path_sensitive_2() -> Result<()> {
   "#;
 
     let (status, _before, after) = run_sccp_on_text(input)?;
-    assert!(!after.contains("<2: i64>"));
-    assert_eq!(status, IRStatus::Unchanged);
+    assert!(after.contains("llvm.add"));
+    // Materialized constants inserted into ^bb0, ^bb1, and ^bb2
+    assert_eq!(status, IRStatus::Changed);
     Ok(())
 }
 
@@ -294,7 +293,140 @@ fn sccp_folds_inside_nested_region() -> Result<()> {
     assert_eq!(status, IRStatus::Changed);
     // The inner add should fold to 7.
     assert!(after.contains("<7: i64>"));
-    // The inner add op itself should be gone.
     assert!(!after.contains("llvm.add"));
+    Ok(())
+}
+
+#[test]
+fn sccp_materializes_constant_block_arg() -> Result<()> {
+    let input = r#"
+    llvm.func @f: llvm.func <builtin.integer i64 () variadic = false> [] {
+      ^entry():
+      c = builtin.constant <builtin.integer <42: i64>> : builtin.integer i64;
+      llvm.br ^bb1(c)
+
+      ^bb1(x: builtin.integer i64):
+      llvm.return x
+    }
+  "#;
+
+    let (status, _before, after) = run_sccp_on_text(input)?;
+    assert_eq!(status, IRStatus::Changed);
+    assert_eq!(after.matches("constant").count(), 2);
+    Ok(())
+}
+
+#[test]
+fn sccp_materializes_multiple_constant_block_args() -> Result<()> {
+    let input = r#"
+    llvm.func @f: llvm.func <builtin.integer i64 (builtin.integer i1) variadic = false> [] {
+      ^entry(cond: builtin.integer i1):
+      a0 = builtin.constant <builtin.integer <3: i64>> : builtin.integer i64;
+      b0 = builtin.constant <builtin.integer <5: i64>> : builtin.integer i64;
+      a1 = builtin.constant <builtin.integer <3: i64>> : builtin.integer i64;
+      b1 = builtin.constant <builtin.integer <5: i64>> : builtin.integer i64;
+      llvm.cond_br if cond ^bb1(a0, b0) else ^bb1(a1, b1)
+
+      ^bb1(x: builtin.integer i64, y: builtin.integer i64):
+      llvm.return x
+    }
+  "#;
+
+    let (status, _before, after) = run_sccp_on_text(input)?;
+    assert_eq!(status, IRStatus::Changed);
+    assert_eq!(after.matches("constant").count(), 6);
+    Ok(())
+}
+
+#[test]
+fn sccp_materializes_constant_carried_through_loop_back_edge() -> Result<()> {
+    let input = r#"
+    llvm.func @f: llvm.func <builtin.integer i64 (builtin.integer i1) variadic = false> [] {
+      ^entry(cond: builtin.integer i1):
+      c = builtin.constant <builtin.integer <42: i64>> : builtin.integer i64;
+      llvm.br ^loop(c)
+
+      ^loop(x: builtin.integer i64):
+      llvm.cond_br if cond ^loop(x) else ^exit(x)
+
+      ^exit(y: builtin.integer i64):
+      llvm.return y
+    }
+  "#;
+
+    let (status, _before, after) = run_sccp_on_text(input)?;
+    assert_eq!(status, IRStatus::Changed);
+    assert_eq!(after.matches("constant").count(), 3);
+    Ok(())
+}
+
+#[test]
+fn sccp_loop_back_edge_with_different_constant_joins_to_unknown() -> Result<()> {
+    let input = r#"
+    llvm.func @f: llvm.func <builtin.integer i64 (builtin.integer i1) variadic = false> [] {
+      ^entry(cond: builtin.integer i1):
+      c1 = builtin.constant <builtin.integer <42: i64>> : builtin.integer i64;
+      llvm.br ^loop(c1)
+
+      ^loop(x: builtin.integer i64):
+      c2 = builtin.constant <builtin.integer <99: i64>> : builtin.integer i64;
+      llvm.cond_br if cond ^loop(c2) else ^exit(x)
+
+      ^exit(y: builtin.integer i64):
+      llvm.return y
+    }
+  "#;
+
+    let (status, _before, after) = run_sccp_on_text(input)?;
+    assert_eq!(status, IRStatus::Unchanged);
+    assert_eq!(after.matches("constant").count(), 2);
+    Ok(())
+}
+
+#[test]
+fn sccp_materialization_replaces_uses_of_block_arg() -> Result<()> {
+    let input = r#"
+    llvm.func @f: llvm.func <builtin.integer i64 () variadic = false> [] {
+      ^entry():
+      c = builtin.constant <builtin.integer <42: i64>> : builtin.integer i64;
+      llvm.br ^bb1(c)
+
+      ^bb1(supercalifragilistic: builtin.integer i64):
+      sum = llvm.add califragilistic, califragilistic <{nsw=false,nuw=false}> : builtin.integer i64;
+      llvm.return sum
+    }
+  "#;
+
+    // Source: the arg name appears at its declaration site and twice as an
+    // operand of `llvm.add` -> 3 occurrences.
+    assert_eq!(input.matches("califragilistic").count(), 3);
+
+    let (status, _before, after) = run_sccp_on_text(input)?;
+    assert_eq!(status, IRStatus::Changed);
+    // After materialization, all uses of the block arg should have been
+    // replaced with the materialized constant's result. The arg name should
+    // remain only at its declaration site in the block header and in the
+    // preserved debug-info metadata for that declaration.
+    assert_eq!(after.matches("califragilistic").count(), 2);
+    Ok(())
+}
+
+#[test]
+fn sccp_does_not_materialize_unknown_block_arg() -> Result<()> {
+    let input = r#"
+    llvm.func @f: llvm.func <builtin.integer i64 (builtin.integer i1) variadic = false> [] {
+      ^entry(cond: builtin.integer i1):
+      a0 = builtin.constant <builtin.integer <3: i64>> : builtin.integer i64;
+      a1 = builtin.constant <builtin.integer <7: i64>> : builtin.integer i64;
+      llvm.cond_br if cond ^bb1(a0) else ^bb1(a1)
+
+      ^bb1(x: builtin.integer i64):
+      llvm.return x
+    }
+  "#;
+
+    let (status, _before, after) = run_sccp_on_text(input)?;
+    assert_eq!(status, IRStatus::Unchanged);
+    assert_eq!(after.matches("constant").count(), 2);
     Ok(())
 }

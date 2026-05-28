@@ -1,7 +1,14 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{
-    attribute::AttrObj, basic_block::BasicBlock, common_traits::Named, context::{Context, Ptr}, linked_list::ContainsLinkedList, operation::Operation, printable::{self, Printable}, value::Value
+    attribute::AttrObj,
+    basic_block::BasicBlock,
+    common_traits::Named,
+    context::{Context, Ptr},
+    linked_list::ContainsLinkedList,
+    operation::Operation,
+    printable::{self, Printable},
+    value::Value,
 };
 
 /// Information about whether a block is reachable or not.
@@ -142,7 +149,11 @@ impl SccpState {
     pub(super) fn merge_val_state(&mut self, ctx: &Context, val: Value, incoming: ValState) {
         let old = self.get_val_state(val);
         let new = ValState::join(&old, &incoming);
-        log::trace!("Merging val state {} into value {}", incoming.disp(ctx), val.disp(ctx));
+        log::trace!(
+            "Merging val state {} into value {}",
+            incoming.disp(ctx),
+            val.disp(ctx)
+        );
         if !ValState::leq(&new, &old) {
             log::trace!("Inflated state of {} to {}", val.disp(ctx), new.disp(ctx));
             self.val_states.insert(val, new);
@@ -153,12 +164,25 @@ impl SccpState {
     /// Join `incoming` into whatever [BlockState] is currently stored at `block`,
     /// storing the result. If the join is strictly greater than the previous stored value,
     /// insert `block` into the block worklist.
-    pub(super) fn merge_block_state(&mut self, ctx: &Context, block: Ptr<BasicBlock>, incoming: BlockState) {
+    pub(super) fn merge_block_state(
+        &mut self,
+        ctx: &Context,
+        block: Ptr<BasicBlock>,
+        incoming: BlockState,
+    ) {
         let old = self.get_block_state(block);
         let new = BlockState::join(&old, &incoming);
-        log::trace!("Merging block state {} into block {}", incoming.disp(ctx), block.given_name(ctx).unwrap());
+        log::trace!(
+            "Merging block state {} into block {}",
+            incoming.disp(ctx),
+            block.given_name(ctx).unwrap()
+        );
         if !BlockState::leq(&new, &old) {
-            log::trace!("Inflated state of {} to {}", block.given_name(ctx).unwrap(), new.disp(ctx));
+            log::trace!(
+                "Inflated state of {} to {}",
+                block.given_name(ctx).unwrap(),
+                new.disp(ctx)
+            );
             self.block_states.insert(block, new);
             self.block_worklist.insert(block);
         }

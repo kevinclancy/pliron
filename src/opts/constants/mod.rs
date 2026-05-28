@@ -1,13 +1,23 @@
-use pliron_derive::op_interface;
-use rustc_hash::FxHashSet;
 use crate::{
-    attribute::AttrObj, basic_block::BasicBlock, builtin::op_interfaces::BranchOpInterface, context::{Context, Ptr}, graph::walkers::{IRNode, WALKCONFIG_PREORDER_FORWARD, uninterruptible::immutable::walk_op}, irbuild::{
+    attribute::{AttrObj, attr_cast},
+    basic_block::BasicBlock,
+    builtin::{attr_interfaces::MaterializableAttr, op_interfaces::BranchOpInterface},
+    context::{Context, Ptr},
+    graph::walkers::{IRNode, WALKCONFIG_PREORDER_FORWARD, uninterruptible::immutable::walk_op},
+    irbuild::{
         IRStatus,
         inserter::Inserter,
         listener::Recorder,
         rewriter::{IRRewriter, Rewriter},
-    }, linked_list::ContainsLinkedList, op::{Op, op_cast}, operation::Operation, result::Result, value::Value
+    },
+    linked_list::ContainsLinkedList,
+    op::{Op, op_cast},
+    operation::Operation,
+    result::Result,
+    value::Value,
 };
+use pliron_derive::op_interface;
+use rustc_hash::FxHashSet;
 
 mod state;
 use state::{BlockState, SccpState, ValState};
@@ -41,12 +51,11 @@ pub trait ConstFoldInterface {
 
 /// Interface for ruling out branch destinations based on static information about branch conditions.
 #[op_interface]
-pub trait BranchOpFoldInterface : BranchOpInterface {
+pub trait BranchOpFoldInterface: BranchOpInterface {
     /// Return the list of possible successor blocks given that `operands`
     /// contains `Some(attr)` for each operand known to be constant, where `attr` contains
     /// the known constant value.
-    fn check_fold(&self, ctx: &Context, operands: &[Option<AttrObj>])
-    -> Vec<Ptr<BasicBlock>>;
+    fn check_fold(&self, ctx: &Context, operands: &[Option<AttrObj>]) -> Vec<Ptr<BasicBlock>>;
 
     fn verify(_op: &dyn Op, _ctx: &Context) -> Result<()>
     where
@@ -110,10 +119,8 @@ fn process_fold_op(fold_op: &dyn ConstFoldInterface, ctx: &Context, state: &mut 
 fn process_branch_op(branch_op: &dyn BranchOpFoldInterface, ctx: &Context, state: &mut SccpState) {
     let op = branch_op.get_operation();
     let attrs = operand_attrs(op, ctx, state);
-    let live_successors: FxHashSet<Ptr<BasicBlock>> = branch_op
-        .check_fold(ctx, &attrs)
-        .into_iter()
-        .collect();
+    let live_successors: FxHashSet<Ptr<BasicBlock>> =
+        branch_op.check_fold(ctx, &attrs).into_iter().collect();
     let static_successors: Vec<Ptr<BasicBlock>> = op.deref(ctx).successors().collect();
     for (succ_idx, succ_block) in static_successors.into_iter().enumerate() {
         if !live_successors.contains(&succ_block) {
@@ -153,8 +160,12 @@ fn process_op(op: Ptr<Operation>, ctx: &Context, state: &mut SccpState) {
     if let Some(_) = opt_branch {
         let opt_op_foldable = op_cast::<dyn BranchOpFoldInterface>(op_dyn.as_ref());
         match opt_op_foldable {
-            Some(op_foldable) => { process_branch_op(op_foldable, ctx, state); }
-            None => panic!("the `constants` optimizer requires all branch ops to implement BranchOpFoldableInterface")
+            Some(op_foldable) => {
+                process_branch_op(op_foldable, ctx, state);
+            }
+            None => panic!(
+                "the `constants` optimizer requires all branch ops to implement BranchOpFoldableInterface"
+            ),
         }
     } else if let Some(op) = opt_fold {
         process_fold_op(op, ctx, state);
@@ -202,26 +213,37 @@ pub fn sccp(root_op: Ptr<Operation>, ctx: &mut Context) -> Result<IRStatus> {
     }
 
     let mut fold_candidates: Vec<(Ptr<Operation>, Vec<Option<AttrObj>>)> = Vec::new();
+    let mut const_block_args: Vec<(Ptr<BasicBlock>, Value, AttrObj)> = Vec::new();
     walk_op(
         ctx,
-        &mut (&state, &mut fold_candidates),
+        &mut (&state, &mut fold_candidates, &mut const_block_args),
         &WALKCONFIG_PREORDER_FORWARD,
         root_op,
-        |ctx, (state, candidates), node| {
-            let IRNode::Operation(op) = node else {
-                return;
-            };
-            let Some(parent) = op.deref(ctx).get_parent_block() else {
-                return;
-            };
-            if !matches!(state.get_block_state(parent), BlockState::Reachable) {
-                return;
+        |ctx, (state, candidates, const_args), node| match node {
+            IRNode::Operation(op) => {
+                let Some(parent) = op.deref(ctx).get_parent_block() else {
+                    return;
+                };
+                if !matches!(state.get_block_state(parent), BlockState::Reachable) {
+                    return;
+                }
+                let op_dyn = Operation::get_op_dyn(op, ctx);
+                if op_cast::<dyn ConstFoldInterface>(op_dyn.as_ref()).is_none() {
+                    return;
+                }
+                candidates.push((op, operand_attrs(op, ctx, state)));
             }
-            let op_dyn = Operation::get_op_dyn(op, ctx);
-            if op_cast::<dyn ConstFoldInterface>(op_dyn.as_ref()).is_none() {
-                return;
+            IRNode::BasicBlock(block) => {
+                if !matches!(state.get_block_state(block), BlockState::Reachable) {
+                    return;
+                }
+                for arg in block.deref(ctx).arguments() {
+                    if let ValState::Constant { val } = state.get_val_state(arg) {
+                        const_args.push((block, arg, val));
+                    }
+                }
             }
-            candidates.push((op, operand_attrs(op, ctx, state)));
+            IRNode::Region(_) => {}
         },
     );
 
@@ -232,6 +254,19 @@ pub fn sccp(root_op: Ptr<Operation>, ctx: &mut Context) -> Result<IRStatus> {
         let op_dyn = Operation::get_op_dyn(op, ctx);
         let fold_interface = op_cast::<dyn ConstFoldInterface>(op_dyn.as_ref()).unwrap();
         status |= fold_interface.fold_in_place(ctx, &attrs, &mut rewriter);
+    }
+
+    for (block, arg, val) in const_block_args {
+        let materialized_op = attr_cast::<dyn MaterializableAttr>(&*val)
+            .expect(
+                "SCCP requires constant block arguments' attributes to implement MaterializableAttr",
+            )
+            .materialize(ctx);
+        rewriter.set_insertion_point_to_block_start(block);
+        rewriter.insert_operation(ctx, materialized_op);
+        let new_value = materialized_op.deref(ctx).get_result(0);
+        rewriter.replace_value_uses_with(ctx, arg, new_value);
+        status |= IRStatus::Changed;
     }
 
     Ok(status)

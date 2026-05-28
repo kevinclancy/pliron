@@ -38,9 +38,12 @@ use pliron::{
     location::{Located, Location},
     op::{Op, OpObj},
     operation::Operation,
-    opts::{mem2reg::{
-        AllocInfo, PromotableAllocationInterface, PromotableOpInterface, PromotableOpKind,
-    }, constants::BranchOpFoldInterface},
+    opts::{
+        constants::BranchOpFoldInterface,
+        mem2reg::{
+            AllocInfo, PromotableAllocationInterface, PromotableOpInterface, PromotableOpKind,
+        },
+    },
     parsable::{IntoParseResult, Parsable, ParseResult, StateStream},
     printable::{self, Printable, indented_nl},
     region::Region,
@@ -643,12 +646,9 @@ impl BranchOpInterface for BrOp {
     }
 }
 
+#[op_interface_impl]
 impl BranchOpFoldInterface for BrOp {
-    fn check_fold(
-        &self,
-        ctx: &Context,
-        _operands: &[Option<AttrObj>],
-    ) -> Vec<Ptr<BasicBlock>> {
+    fn check_fold(&self, ctx: &Context, _operands: &[Option<AttrObj>]) -> Vec<Ptr<BasicBlock>> {
         self.get_operation().deref(ctx).successors().collect()
     }
 }
@@ -866,12 +866,9 @@ impl BranchOpInterface for CondBrOp {
     }
 }
 
+#[op_interface_impl]
 impl BranchOpFoldInterface for CondBrOp {
-    fn check_fold(
-        &self,
-        ctx: &Context,
-        operands: &[Option<AttrObj>],
-    ) -> Vec<Ptr<BasicBlock>> {
+    fn check_fold(&self, ctx: &Context, operands: &[Option<AttrObj>]) -> Vec<Ptr<BasicBlock>> {
         let successors: Vec<Ptr<BasicBlock>> =
             self.get_operation().deref(ctx).successors().collect();
         let Some(cond_attr) = operands.first().and_then(|o| o.as_ref()) else {
@@ -1175,12 +1172,9 @@ impl BranchOpInterface for SwitchOp {
     }
 }
 
+#[op_interface_impl]
 impl BranchOpFoldInterface for SwitchOp {
-    fn check_fold(
-        &self,
-        ctx: &Context,
-        operands: &[Option<AttrObj>],
-    ) -> Vec<Ptr<BasicBlock>> {
+    fn check_fold(&self, ctx: &Context, operands: &[Option<AttrObj>]) -> Vec<Ptr<BasicBlock>> {
         let successors: Vec<Ptr<BasicBlock>> =
             self.get_operation().deref(ctx).successors().collect();
         let Some(cond_attr) = operands.first().and_then(|o| o.as_ref()) else {
