@@ -391,7 +391,7 @@ fn sccp_materialization_replaces_uses_of_block_arg() -> Result<()> {
       c = builtin.constant <builtin.integer <42: i64>> : builtin.integer i64;
       llvm.br ^bb1(c)
 
-      ^bb1(supercalifragilistic: builtin.integer i64):
+      ^bb1(califragilistic: builtin.integer i64):
       sum = llvm.add califragilistic, califragilistic <{nsw=false,nuw=false}> : builtin.integer i64;
       llvm.return sum
     }
