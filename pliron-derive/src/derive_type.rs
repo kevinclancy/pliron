@@ -1,4 +1,4 @@
-use proc_macro2::{Span, TokenStream};
+use proc_macro2::TokenStream;
 use quote::{ToTokens, quote};
 use syn::{DeriveInput, LitStr, Result};
 
@@ -208,42 +208,20 @@ impl ToTokens for DeriveTypeGet {
 
 /// Generate get methods for types based on their fields
 fn derive_type_get_impl(ident: &syn::Ident, fields: &syn::Fields) -> TokenStream {
-    let type_name = ident.to_string();
+    let field_params = generate_field_params(fields);
+    let struct_construction = generate_struct_construction(ident, fields);
 
-    if fields.is_empty() {
-        let msg = LitStr::new(
-            &format!("{} singleton not instantiated", type_name),
-            Span::call_site(),
-        );
-        quote! {
-            impl #ident {
-                /// Get the singleton instance.
-                pub fn get(
-                    ctx: &::pliron::context::Context
-                ) -> ::pliron::r#type::TypePtr<Self> {
-                    ::pliron::r#type::Type::get_instance(
-                        Self {},
-                        ctx,
-                    ).expect(#msg)
-                }
-            }
-        }
-    } else {
-        let field_params = generate_field_params(fields);
-        let struct_construction = generate_struct_construction(ident, fields);
-
-        quote! {
-            impl #ident {
-                /// Get or create a new instance.
-                pub fn get(
-                    ctx: &mut ::pliron::context::Context,
-                    #field_params
-                ) -> ::pliron::r#type::TypePtr<Self> {
-                    ::pliron::r#type::Type::register_instance(
-                        #struct_construction,
-                        ctx,
-                    )
-                }
+    quote! {
+        impl #ident {
+            /// Get or create a new instance.
+            pub fn get(
+                ctx: &::pliron::context::Context,
+                #field_params
+            ) -> ::pliron::r#type::TypedHandle<Self> {
+                ::pliron::r#type::Type::register_instance(
+                    #struct_construction,
+                    ctx,
+                )
             }
         }
     }
@@ -489,10 +467,9 @@ mod tests {
         expect![[r#"
             pub struct UnitType;
             impl UnitType {
-                /// Get the singleton instance.
-                pub fn get(ctx: &::pliron::context::Context) -> ::pliron::r#type::TypePtr<Self> {
-                    ::pliron::r#type::Type::get_instance(Self {}, ctx)
-                        .expect("UnitType singleton not instantiated")
+                /// Get or create a new instance.
+                pub fn get(ctx: &::pliron::context::Context) -> ::pliron::r#type::TypedHandle<Self> {
+                    ::pliron::r#type::Type::register_instance(UnitType {}, ctx)
                 }
             }
         "#]]
@@ -504,7 +481,7 @@ mod tests {
         let args = quote! {};
         let input = quote! {
             pub struct VectorType {
-                elem_ty: Ptr<TypeObj>,
+                elem_ty: TypeHandle,
                 num_elems: u32,
                 kind: VectorTypeKind,
             }
@@ -515,18 +492,18 @@ mod tests {
 
         expect![[r#"
             pub struct VectorType {
-                elem_ty: Ptr<TypeObj>,
+                elem_ty: TypeHandle,
                 num_elems: u32,
                 kind: VectorTypeKind,
             }
             impl VectorType {
                 /// Get or create a new instance.
                 pub fn get(
-                    ctx: &mut ::pliron::context::Context,
-                    elem_ty: Ptr<TypeObj>,
+                    ctx: &::pliron::context::Context,
+                    elem_ty: TypeHandle,
                     num_elems: u32,
                     kind: VectorTypeKind,
-                ) -> ::pliron::r#type::TypePtr<Self> {
+                ) -> ::pliron::r#type::TypedHandle<Self> {
                     ::pliron::r#type::Type::register_instance(
                         VectorType {
                             elem_ty,
@@ -556,11 +533,11 @@ mod tests {
             impl TupleType {
                 /// Get or create a new instance.
                 pub fn get(
-                    ctx: &mut ::pliron::context::Context,
+                    ctx: &::pliron::context::Context,
                     field_0: u32,
                     field_1: String,
                     field_2: bool,
-                ) -> ::pliron::r#type::TypePtr<Self> {
+                ) -> ::pliron::r#type::TypedHandle<Self> {
                     ::pliron::r#type::Type::register_instance(
                         TupleType(field_0, field_1, field_2),
                         ctx,

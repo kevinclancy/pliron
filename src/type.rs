@@ -32,14 +32,14 @@
 //! This function verifies all interfaces implemented by the type, and then the type itself.
 //! The type's verifier must explicitly invoke verifiers on any sub-objects it contains.
 //!
-//! [TypeObj]s can be downcasted to their concrete types using
+//! [TypeHandle]s can be [TypeHandle::deref]'d and downcasted to their concrete types using
 //! [downcast_rs](https://docs.rs/downcast-rs/latest/downcast_rs/#example-without-generics).
 
 use crate::{
     arg_err_noloc,
     combine::{Parser, parser},
     common_traits::Verify,
-    context::{Arena, Context, Ptr, collect_deduped_interface_verifiers, private::ArenaObj},
+    context::{Context, collect_deduped_interface_verifiers},
     deps::{hash::FxHashMap, sync::LazyLock},
     dialect::{Dialect, DialectName},
     identifier::Identifier,
@@ -58,7 +58,7 @@ use alloc::{
     vec::Vec,
 };
 use core::{
-    cell::Ref,
+    cell::{Ref, RefCell, RefMut},
     fmt::{Debug, Display},
     hash::{Hash, Hasher},
     marker::PhantomData,
@@ -102,54 +102,44 @@ pub trait Type: Printable + Verify + Downcast + Sync + Send + Debug {
     /// Is self equal to an other Type?
     fn eq_type(&self, other: &dyn Type) -> bool;
 
-    /// Get a copyable pointer to this type.
-    // Unlike in other [ArenaObj]s,
-    // we do not store a self pointer inside the object itself
+    /// Get a copyable handle to this type.
+    // Unlike in [ArenaObj]s, we do not store a self handle inside the object itself
     // because that can upset taking automatic hashes of the object.
-    fn get_self_ptr(&self, ctx: &Context) -> Ptr<TypeObj> {
-        let is = |other: &TypeObj| self.eq_type(&**other);
+    fn get_self_handle(&self, ctx: &Context) -> TypeHandle {
+        let is = |other: &TypeObj| self.eq_type(&**other.0.borrow());
         let idx = ctx
             .type_store
             .get(self.hash_type(), &is)
             .expect("Unregistered type object in existence");
-        Ptr {
-            idx,
-            _dummy: PhantomData::<TypeObj>,
-        }
+        TypeHandle(idx)
     }
 
     /// Register an instance of a type in the provided [Context]
-    /// Returns a pointer to self. If the type was already registered,
-    /// a pointer to the existing object is returned.
-    fn register_instance(t: Self, ctx: &mut Context) -> TypePtr<Self>
+    /// Returns [TypeHandle] to self. If the type was already registered,
+    /// the existing handle is returned.
+    fn register_instance(t: Self, ctx: &Context) -> TypedHandle<Self>
     where
         Self: Sized,
     {
         let hash = t.hash_type();
-        let idx = ctx
-            .type_store
-            .get_or_create_unique(Box::new(t), hash, &TypeObj::eq);
-        let ptr = Ptr {
-            idx,
-            _dummy: PhantomData::<TypeObj>,
-        };
-        TypePtr(ptr, PhantomData::<Self>)
+        let idx = ctx.type_store.get_or_create_unique(
+            TypeObj(RefCell::new(Box::new(t))),
+            hash,
+            &TypeObj::eq,
+        );
+        TypedHandle(TypeHandle(idx), PhantomData::<Self>)
     }
 
-    /// If an instance of `t` already exists, get a [Ptr] to it.
+    /// If an instance of `t` already exists, get a [TypeHandle] to it.
     /// Consumes `t` either way.
-    fn get_instance(t: Self, ctx: &Context) -> Option<TypePtr<Self>>
+    fn get_instance(t: Self, ctx: &Context) -> Option<TypedHandle<Self>>
     where
         Self: Sized,
     {
-        let is = |other: &TypeObj| t.eq_type(&**other);
-        ctx.type_store.get(t.hash_type(), &is).map(|idx| {
-            let ptr = Ptr {
-                idx,
-                _dummy: PhantomData::<TypeObj>,
-            };
-            TypePtr(ptr, PhantomData::<Self>)
-        })
+        let is = |other: &TypeObj| t.eq_type(&**other.0.borrow());
+        ctx.type_store
+            .get(t.hash_type(), &is)
+            .map(|idx| TypedHandle(TypeHandle(idx), PhantomData::<Self>))
     }
 
     /// Get a Type's static name. This is *not* per instantiation of the type.
@@ -169,12 +159,12 @@ pub trait Type: Printable + Verify + Downcast + Sync + Send + Debug {
     /// Register this Type's [TypeId] in the dialect it belongs to.
     fn register(ctx: &mut Context)
     where
-        Self: Sized + Parsable<Arg = (), Parsed = TypePtr<Self>>,
+        Self: Sized + Parsable<Arg = (), Parsed = TypedHandle<Self>>,
     {
         let ptr_parser: TypeParserFn = Box::new(|&()| {
             combine::parser(move |parsable_state: &mut StateStream<'_>| {
                 Self::parse(parsable_state, ())
-                    .map(|(typtr, r)| -> (Ptr<TypeObj>, _) { (typtr.to_ptr(), r) })
+                    .map(|(typtr, r)| -> (TypeHandle, _) { (typtr.to_handle(), r) })
             })
             .boxed()
         });
@@ -190,41 +180,41 @@ pub(crate) type TypeParserFn = Box<
     for<'a> fn(
         &'a (),
     )
-        -> Box<dyn Parser<StateStream<'a>, Output = Ptr<TypeObj>, PartialState = ()> + 'a>,
+        -> Box<dyn Parser<StateStream<'a>, Output = TypeHandle, PartialState = ()> + 'a>,
 >;
 
 /// Trait for IR entities that have a direct type.
 pub trait Typed {
     /// Get the [Type] of the current entity.
-    fn get_type(&self, ctx: &Context) -> Ptr<TypeObj>;
+    fn get_type(&self, ctx: &Context) -> TypeHandle;
 }
 
-impl Typed for Ptr<TypeObj> {
-    fn get_type(&self, _ctx: &Context) -> Ptr<TypeObj> {
+impl Typed for TypeHandle {
+    fn get_type(&self, _ctx: &Context) -> TypeHandle {
         *self
     }
 }
 
 impl Typed for dyn Type {
-    fn get_type(&self, ctx: &Context) -> Ptr<TypeObj> {
-        self.get_self_ptr(ctx)
+    fn get_type(&self, ctx: &Context) -> TypeHandle {
+        self.get_self_handle(ctx)
     }
 }
 
 impl<T: Typed + ?Sized> Typed for &T {
-    fn get_type(&self, ctx: &Context) -> Ptr<TypeObj> {
+    fn get_type(&self, ctx: &Context) -> TypeHandle {
         (*self).get_type(ctx)
     }
 }
 
 impl<T: Typed + ?Sized> Typed for &mut T {
-    fn get_type(&self, ctx: &Context) -> Ptr<TypeObj> {
+    fn get_type(&self, ctx: &Context) -> TypeHandle {
         (**self).get_type(ctx)
     }
 }
 
 impl<T: Typed + ?Sized> Typed for Box<T> {
-    fn get_type(&self, ctx: &Context) -> Ptr<TypeObj> {
+    fn get_type(&self, ctx: &Context) -> TypeHandle {
         (**self).get_type(ctx)
     }
 }
@@ -309,13 +299,12 @@ impl Display for TypeId {
     }
 }
 
-/// Since we can't store the [Type] trait in the arena,
-/// we store boxed dyn objects of it instead.
-pub type TypeObj = Box<dyn Type>;
+/// An instance of a [Type] stored in the [Context]'s type store.
+pub(crate) struct TypeObj(RefCell<Box<dyn Type>>);
 
 impl PartialEq for TypeObj {
     fn eq(&self, other: &Self) -> bool {
-        (**self).eq_type(&**other)
+        self.0.borrow().eq_type(&**other.0.borrow())
     }
 }
 
@@ -323,41 +312,58 @@ impl Eq for TypeObj {}
 
 impl Hash for TypeObj {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        state.write(&u64::from(self.hash_type()).to_ne_bytes())
+        state.write(&u64::from(self.0.borrow().hash_type()).to_ne_bytes())
     }
 }
 
-impl ArenaObj for TypeObj {
-    fn get_arena(ctx: &Context) -> &Arena<Self> {
-        &ctx.type_store.unique_store
+/// A handle to the uniqued [Type] objects stored in the [Context].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TypeHandle(usize);
+
+impl TypeHandle {
+    /// Get a reference to the underlying [Type] object.
+    pub fn deref<'a>(&self, ctx: &'a Context) -> Ref<'a, dyn Type> {
+        Ref::map(
+            ctx.type_store.unique_store.get(self.0).unwrap().0.borrow(),
+            |t| &**t,
+        )
     }
 
-    fn get_arena_mut(ctx: &mut Context) -> &mut Arena<Self> {
-        &mut ctx.type_store.unique_store
-    }
-
-    fn get_self_ptr(&self, ctx: &Context) -> Ptr<Self> {
-        self.as_ref().get_self_ptr(ctx)
-    }
-
-    fn dealloc_sub_objects(_ptr: Ptr<Self>, _ctx: &mut Context) {
-        panic!("Cannot dealloc arena sub-objects of types")
+    /// Get a mutable reference to the underlying [Type] object.
+    /// This is only used when building recursive types, and the caller must ensure
+    /// that the mutation does not change the hash-relevant contents of the type.
+    pub fn deref_mut<'a>(&self, ctx: &'a Context) -> RefMut<'a, dyn Type> {
+        RefMut::map(
+            ctx.type_store
+                .unique_store
+                .get(self.0)
+                .unwrap()
+                .0
+                .borrow_mut(),
+            |t| &mut **t,
+        )
     }
 }
 
-impl Printable for TypeObj {
+impl Printable for TypeHandle {
     fn fmt(
         &self,
         ctx: &Context,
         state: &printable::State,
         f: &mut core::fmt::Formatter<'_>,
     ) -> core::fmt::Result {
-        write!(f, "{} ", self.get_type_id())?;
-        Printable::fmt(self.deref(), ctx, state, f)
+        write!(f, "{} ", self.deref(ctx).get_type_id())?;
+        Printable::fmt(&*self.deref(ctx), ctx, state, f)
     }
 }
 
-impl Parsable for Ptr<TypeObj> {
+impl Verify for TypeHandle {
+    fn verify(&self, ctx: &Context) -> Result<()> {
+        verify_type(&*self.deref(ctx), ctx)
+    }
+}
+
+impl Parsable for TypeHandle {
     type Arg = ();
     type Parsed = Self;
 
@@ -402,79 +408,79 @@ pub fn verify_type(ty: &dyn Type, ctx: &Context) -> Result<()> {
 
 impl Verify for TypeObj {
     fn verify(&self, ctx: &Context) -> Result<()> {
-        verify_type(self.as_ref(), ctx)
+        verify_type(self.0.borrow().as_ref(), ctx)
     }
 }
 
-/// A wrapper around [`Ptr<TypeObj>`](TypeObj) with the underlying [Type] statically marked.
+/// A wrapper around [TypeHandle] with the underlying [Type] statically marked.
 #[derive(Debug)]
-pub struct TypePtr<T: Type>(Ptr<TypeObj>, PhantomData<T>);
+pub struct TypedHandle<T: Type>(TypeHandle, PhantomData<T>);
 
 #[derive(Error, Debug)]
-#[error("TypePtr mismatch: Constructing {expected} but provided {provided}")]
-pub struct TypePtrErr {
+#[error("TypedHandle mismatch: Constructing {expected} but provided {provided}")]
+pub struct TypedHandleErr {
     pub expected: String,
     pub provided: String,
 }
 
-impl<T: Type> TypePtr<T> {
+impl<T: Type> TypedHandle<T> {
     /// Return a [Ref] to the [Type]
     /// This borrows from a RefCell and the borrow is live
     /// as long as the returned [Ref] lives.
     pub fn deref<'a>(&self, ctx: &'a Context) -> Ref<'a, T> {
         Ref::map(self.0.deref(ctx), |t| {
             t.downcast_ref::<T>()
-                .expect("Type mistmatch, inconsistent TypePtr")
+                .expect("Type mistmatch, inconsistent TypedHandle")
         })
     }
 
-    /// Create a new [TypePtr] from [`Ptr<TypeObj>`](TypeObj)
-    pub fn from_ptr(ptr: Ptr<TypeObj>, ctx: &Context) -> Result<TypePtr<T>> {
-        if ptr.deref(ctx).is::<T>() {
-            Ok(TypePtr(ptr, PhantomData::<T>))
+    /// Create a new [TypedHandle] from a [TypeHandle].
+    pub fn from_handle(handle: TypeHandle, ctx: &Context) -> Result<TypedHandle<T>> {
+        if handle.deref(ctx).is::<T>() {
+            Ok(TypedHandle(handle, PhantomData::<T>))
         } else {
-            arg_err_noloc!(TypePtrErr {
+            arg_err_noloc!(TypedHandleErr {
                 expected: T::get_type_id_static().disp(ctx).to_string(),
-                provided: ptr.disp(ctx).to_string()
+                provided: handle.disp(ctx).to_string()
             })
         }
     }
 
-    /// Erase the static rust type.
-    pub fn to_ptr(&self) -> Ptr<TypeObj> {
+    /// Erase the static Rust type and return the underlying [TypeHandle].
+    pub fn to_handle(&self) -> TypeHandle {
         self.0
     }
 }
 
-impl<T: Type> From<TypePtr<T>> for Ptr<TypeObj> {
-    fn from(value: TypePtr<T>) -> Self {
-        value.to_ptr()
+impl<T: Type> From<TypedHandle<T>> for TypeHandle {
+    fn from(value: TypedHandle<T>) -> Self {
+        value.to_handle()
     }
 }
 
-impl<T: Type> Clone for TypePtr<T> {
-    fn clone(&self) -> TypePtr<T> {
+impl<T: Type> Clone for TypedHandle<T> {
+    fn clone(&self) -> TypedHandle<T> {
         *self
     }
 }
 
-impl<T: Type> Copy for TypePtr<T> {}
+impl<T: Type> Copy for TypedHandle<T> {}
 
-impl<T: Type> PartialEq for TypePtr<T> {
+impl<T: Type> PartialEq for TypedHandle<T> {
     fn eq(&self, other: &Self) -> bool {
         self.0 == other.0
     }
 }
 
-impl<T: Type> Eq for TypePtr<T> {}
+impl<T: Type> Eq for TypedHandle<T> {}
 
-impl<T: Type> Hash for TypePtr<T> {
+impl<T: Type> Hash for TypedHandle<T> {
     fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
         self.0.hash(state);
     }
 }
 
-impl<T: Type> Printable for TypePtr<T> {
+impl<T: Type> Printable for TypedHandle<T> {
     fn fmt(
         &self,
         ctx: &Context,
@@ -485,7 +491,7 @@ impl<T: Type> Printable for TypePtr<T> {
     }
 }
 
-impl<T: Type + Parsable<Arg = (), Parsed = TypePtr<T>>> Parsable for TypePtr<T> {
+impl<T: Type + Parsable<Arg = (), Parsed = TypedHandle<T>>> Parsable for TypedHandle<T> {
     type Arg = ();
     type Parsed = Self;
 
@@ -514,9 +520,9 @@ impl<T: Type + Parsable<Arg = (), Parsed = TypePtr<T>>> Parsable for TypePtr<T> 
     }
 }
 
-impl<T: Type> Verify for TypePtr<T> {
+impl<T: Type> Verify for TypedHandle<T> {
     fn verify(&self, ctx: &Context) -> Result<()> {
-        self.0.verify(ctx)
+        self.0.deref(ctx).verify(ctx)
     }
 }
 

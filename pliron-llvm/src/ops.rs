@@ -40,7 +40,7 @@ use pliron::{
     region::Region,
     result::{Error, ErrorKind, Result},
     symbol_table::SymbolTableCollection,
-    r#type::{TypeObj, TypePtr, type_cast, type_impls},
+    r#type::{TypeHandle, TypedHandle, type_cast, type_impls},
     utils::vec_exns::VecExtns,
     value::Value,
     verify_err, verify_error,
@@ -474,7 +474,7 @@ impl Verify for AllocaOp {
 
 #[op_interface_impl]
 impl PointerTypeResult for AllocaOp {
-    fn result_pointee_type(&self, ctx: &Context) -> Ptr<TypeObj> {
+    fn result_pointee_type(&self, ctx: &Context) -> TypeHandle {
         self.get_attr_alloca_element_type(ctx)
             .expect("AllocaOp missing or incorrect type for elem_type attribute")
             .get_type(ctx)
@@ -483,7 +483,7 @@ impl PointerTypeResult for AllocaOp {
 
 impl AllocaOp {
     /// Create a new [AllocaOp]
-    pub fn new(ctx: &mut Context, elem_type: Ptr<TypeObj>, size: Value) -> Self {
+    pub fn new(ctx: &mut Context, elem_type: TypeHandle, size: Value) -> Self {
         // `alloca` yields a pointer in the default (stack) address space.
         let ptr_ty = PointerType::get(ctx, 0).into();
         let op = Operation::new(
@@ -1196,7 +1196,7 @@ impl Verify for SwitchOp {
         }
 
         let condition_ty = pliron::r#type::Typed::get_type(&op.get_operand(0), ctx);
-        let condition_ty = TypePtr::<IntegerType>::from_ptr(condition_ty, ctx)?;
+        let condition_ty = TypedHandle::<IntegerType>::from_handle(condition_ty, ctx)?;
 
         if let Some(case_value) = case_values.0.first() {
             // Ensure that the case value type matches the condition type.
@@ -1262,7 +1262,7 @@ pub struct GetElementPtrOp;
 
 #[op_interface_impl]
 impl PointerTypeResult for GetElementPtrOp {
-    fn result_pointee_type(&self, ctx: &Context) -> Ptr<TypeObj> {
+    fn result_pointee_type(&self, ctx: &Context) -> TypeHandle {
         Self::indexed_type(ctx, self.src_elem_type(ctx), &self.indices(ctx))
             .expect("Invalid indices for GEP")
     }
@@ -1297,7 +1297,7 @@ impl GetElementPtrOp {
         ctx: &mut Context,
         base: Value,
         indices: Vec<GepIndex>,
-        src_elem_type: Ptr<TypeObj>,
+        src_elem_type: TypeHandle,
     ) -> Self {
         use pliron::r#type::Typed;
 
@@ -1339,7 +1339,7 @@ impl GetElementPtrOp {
     }
 
     /// Get the source pointer's element type.
-    pub fn src_elem_type(&self, ctx: &Context) -> Ptr<TypeObj> {
+    pub fn src_elem_type(&self, ctx: &Context) -> TypeHandle {
         self.get_attr_gep_src_elem_type(ctx)
             .expect("GetElementPtrOp missing or has incorrect src_elem_type attribute type")
             .get_type(ctx)
@@ -1363,14 +1363,14 @@ impl GetElementPtrOp {
     /// See [getIndexedType](https://llvm.org/doxygen/classllvm_1_1GetElementPtrInst.html#a99d4bfe49182f8d80abb1960f2c12d46)
     pub fn indexed_type(
         ctx: &Context,
-        src_elem_type: Ptr<TypeObj>,
+        src_elem_type: TypeHandle,
         indices: &[GepIndex],
-    ) -> Result<Ptr<TypeObj>> {
+    ) -> Result<TypeHandle> {
         fn indexed_type_inner(
             ctx: &Context,
-            src_elem_type: Ptr<TypeObj>,
+            src_elem_type: TypeHandle,
             mut idx_itr: impl Iterator<Item = GepIndex>,
-        ) -> Result<Ptr<TypeObj>> {
+        ) -> Result<TypeHandle> {
             let Some(idx) = idx_itr.next() else {
                 return Ok(src_elem_type);
             };
@@ -1427,7 +1427,7 @@ pub enum LoadOpVerifyErr {
 pub struct LoadOp;
 impl LoadOp {
     /// Create a new [LoadOp]
-    pub fn new(ctx: &mut Context, ptr: Value, res_ty: Ptr<TypeObj>) -> Self {
+    pub fn new(ctx: &mut Context, ptr: Value, res_ty: TypeHandle) -> Self {
         LoadOp {
             op: Operation::new(
                 ctx,
@@ -1666,7 +1666,7 @@ impl AtomicLoadOp {
     pub fn new(
         ctx: &mut Context,
         ptr: Value,
-        res_ty: Ptr<TypeObj>,
+        res_ty: TypeHandle,
         ordering: AtomicOrderingAttr,
         syncscope: Option<String>,
     ) -> Self {
@@ -1765,7 +1765,7 @@ impl InlineAsmOp {
     /// result value.
     pub fn new(
         ctx: &mut Context,
-        result_ty: Ptr<TypeObj>,
+        result_ty: TypeHandle,
         inputs: Vec<Value>,
         asm_template: &str,
         constraints: &str,
@@ -1811,7 +1811,7 @@ impl CallOp {
     pub fn new(
         ctx: &mut Context,
         callee: CallOpCallable,
-        callee_ty: TypePtr<FuncType>,
+        callee_ty: TypedHandle<FuncType>,
         mut args: Vec<Value>,
     ) -> Self {
         let res_ty = callee_ty.deref(ctx).result_type();
@@ -1886,7 +1886,7 @@ impl SymbolUserOpInterface for CallOp {
                 };
                 let func_op_ty = func_op.get_type(ctx);
 
-                if func_op_ty.to_ptr() != self.callee_type(ctx) {
+                if func_op_ty.to_handle() != self.callee_type(ctx) {
                     return verify_err!(
                         self.loc(ctx),
                         SymbolUserOpVerifyErr::FuncTypeErr(format!(
@@ -2001,7 +2001,7 @@ impl Parsable for CallOp {
         let callee_parser = direct_callee.or(indirect_callee);
         let fastmath_flags_parser = optional(FastmathFlagsAttr::parser(()));
         let args_parser = delimited_list_parser('(', ')', ',', ssa_opd_parser());
-        let ty_parser = spaced(combine::token(':')).with(TypePtr::<FuncType>::parser(()));
+        let ty_parser = spaced(combine::token(':')).with(TypedHandle::<FuncType>::parser(()));
 
         let mut final_parser = spaced(callee_parser)
             .and(spaced(fastmath_flags_parser))
@@ -2090,7 +2090,7 @@ pub struct UndefOp;
 
 impl UndefOp {
     /// Create a new [UndefOp].
-    pub fn new(ctx: &mut Context, result_ty: Ptr<TypeObj>) -> Self {
+    pub fn new(ctx: &mut Context, result_ty: TypeHandle) -> Self {
         let op = Operation::new(
             ctx,
             Self::get_concrete_op_info(),
@@ -2120,7 +2120,7 @@ pub struct PoisonOp;
 
 impl PoisonOp {
     /// Create a new [PoisonOp].
-    pub fn new(ctx: &mut Context, result_ty: Ptr<TypeObj>) -> Self {
+    pub fn new(ctx: &mut Context, result_ty: TypeHandle) -> Self {
         let op = Operation::new(
             ctx,
             Self::get_concrete_op_info(),
@@ -2187,7 +2187,7 @@ pub struct ZeroOp;
 
 impl ZeroOp {
     /// Create a new [ZeroOp].
-    pub fn new(ctx: &mut Context, result_ty: Ptr<TypeObj>) -> Self {
+    pub fn new(ctx: &mut Context, result_ty: TypeHandle) -> Self {
         let op = Operation::new(
             ctx,
             Self::get_concrete_op_info(),
@@ -2232,7 +2232,7 @@ pub struct GlobalOp;
 
 impl GlobalOp {
     /// Create a new [GlobalOp]. An initializer region can be added later if needed.
-    pub fn new(ctx: &mut Context, name: Identifier, ty: Ptr<TypeObj>) -> Self {
+    pub fn new(ctx: &mut Context, name: Identifier, ty: TypeHandle) -> Self {
         let op = Operation::new(ctx, Self::get_concrete_op_info(), vec![], vec![], vec![], 0);
         let op = GlobalOp { op };
         op.set_symbol_name(ctx, name);
@@ -2253,7 +2253,7 @@ impl GlobalOp {
 }
 
 impl pliron::r#type::Typed for GlobalOp {
-    fn get_type(&self, ctx: &Context) -> Ptr<TypeObj> {
+    fn get_type(&self, ctx: &Context) -> TypeHandle {
         pliron::r#type::Typed::get_type(
             &*self
                 .get_attr_llvm_global_type(ctx)
@@ -2703,11 +2703,11 @@ impl Verify for FPExtOp {
     fn verify(&self, ctx: &Context) -> Result<()> {
         // Check operand type to be a float
         let opd_ty = OneOpdInterface::operand_type(self, ctx).deref(ctx);
-        let Some(opd_float_ty) = type_cast::<dyn FloatTypeInterface>(&**opd_ty) else {
+        let Some(opd_float_ty) = type_cast::<dyn FloatTypeInterface>(&*opd_ty) else {
             return verify_err!(self.loc(ctx), FloatCastVerifyErr::OperandTypeErr);
         };
         let res_ty = OneResultInterface::result_type(self, ctx).deref(ctx);
-        let Some(res_float_ty) = type_cast::<dyn FloatTypeInterface>(&**res_ty) else {
+        let Some(res_float_ty) = type_cast::<dyn FloatTypeInterface>(&*res_ty) else {
             return verify_err!(self.loc(ctx), FloatCastVerifyErr::ResultTypeErr);
         };
 
@@ -2783,11 +2783,11 @@ impl Verify for FPTruncOp {
     fn verify(&self, ctx: &Context) -> Result<()> {
         // Check operand type to be a float
         let opd_ty = OneOpdInterface::operand_type(self, ctx).deref(ctx);
-        let Some(opd_float_ty) = type_cast::<dyn FloatTypeInterface>(&**opd_ty) else {
+        let Some(opd_float_ty) = type_cast::<dyn FloatTypeInterface>(&*opd_ty) else {
             return verify_err!(self.loc(ctx), FloatCastVerifyErr::OperandTypeErr);
         };
         let res_ty = OneResultInterface::result_type(self, ctx).deref(ctx);
-        let Some(res_float_ty) = type_cast::<dyn FloatTypeInterface>(&**res_ty) else {
+        let Some(res_float_ty) = type_cast::<dyn FloatTypeInterface>(&*res_ty) else {
             return verify_err!(self.loc(ctx), FloatCastVerifyErr::ResultTypeErr);
         };
 
@@ -2804,11 +2804,11 @@ impl Verify for FPTruncOp {
 }
 
 fn cast_element_types(
-    opd_ty: Ptr<TypeObj>,
-    res_ty: Ptr<TypeObj>,
+    opd_ty: TypeHandle,
+    res_ty: TypeHandle,
     ctx: &Context,
     loc: Location,
-) -> Result<(Ptr<TypeObj>, Ptr<TypeObj>)> {
+) -> Result<(TypeHandle, TypeHandle)> {
     let mut opd_elem_ty = opd_ty;
     let mut res_elem_ty = res_ty;
     let mut opd_vec_shape = None;
@@ -2858,7 +2858,7 @@ impl Verify for FPToSIOp {
             self.loc(ctx),
         )?;
         let opd_ty = opd_ty.deref(ctx);
-        if !type_impls::<dyn FloatTypeInterface>(&**opd_ty) {
+        if !type_impls::<dyn FloatTypeInterface>(&*opd_ty) {
             return verify_err!(self.loc(ctx), FloatCastVerifyErr::OperandTypeErr);
         };
         let res_ty = res_ty.deref(ctx);
@@ -2900,7 +2900,7 @@ impl Verify for FPToUIOp {
             self.loc(ctx),
         )?;
         let opd_ty = opd_ty.deref(ctx);
-        if !type_impls::<dyn FloatTypeInterface>(&**opd_ty) {
+        if !type_impls::<dyn FloatTypeInterface>(&*opd_ty) {
             return verify_err!(self.loc(ctx), FloatCastVerifyErr::OperandTypeErr);
         };
         let res_ty = res_ty.deref(ctx);
@@ -2949,7 +2949,7 @@ impl Verify for SIToFPOp {
             return verify_err!(self.loc(ctx), FloatCastVerifyErr::OperandTypeErr);
         }
         let res_ty = res_ty.deref(ctx);
-        if !type_impls::<dyn FloatTypeInterface>(&**res_ty) {
+        if !type_impls::<dyn FloatTypeInterface>(&*res_ty) {
             return verify_err!(self.loc(ctx), FloatCastVerifyErr::ResultTypeErr);
         }
         Ok(())
@@ -2999,7 +2999,7 @@ impl Verify for UIToFPOp {
             return verify_err!(self.loc(ctx), FloatCastVerifyErr::OperandTypeErr);
         }
         let res_ty = res_ty.deref(ctx);
-        if !type_impls::<dyn FloatTypeInterface>(&**res_ty) {
+        if !type_impls::<dyn FloatTypeInterface>(&*res_ty) {
             return verify_err!(self.loc(ctx), FloatCastVerifyErr::ResultTypeErr);
         }
         Ok(())
@@ -3167,14 +3167,14 @@ impl ExtractValueOp {
     /// Returns the type of the value at the given indices in the given aggregate type.
     pub fn indexed_type(
         ctx: &Context,
-        aggr_type: Ptr<TypeObj>,
+        aggr_type: TypeHandle,
         indices: &[u32],
-    ) -> Result<Ptr<TypeObj>> {
+    ) -> Result<TypeHandle> {
         fn indexed_type_inner(
             ctx: &Context,
-            aggr_type: Ptr<TypeObj>,
+            aggr_type: TypeHandle,
             mut idx_itr: impl Iterator<Item = u32>,
-        ) -> Result<Ptr<TypeObj>> {
+        ) -> Result<TypeHandle> {
             let Some(idx) = idx_itr.next() else {
                 return Ok(aggr_type);
             };
@@ -3269,9 +3269,9 @@ impl InsertElementOp {
     }
 
     /// Get the vector type of the InsertElementOp.
-    pub fn vector_type(&self, ctx: &Context) -> TypePtr<VectorType> {
+    pub fn vector_type(&self, ctx: &Context) -> TypedHandle<VectorType> {
         let ty = self.get_operation().deref(ctx).get_type(0);
-        TypePtr::<VectorType>::from_ptr(ty, ctx)
+        TypedHandle::<VectorType>::from_handle(ty, ctx)
             .expect("InsertElementOp result type is not a VectorType")
     }
 }
@@ -3346,10 +3346,10 @@ impl ExtractElementOp {
     }
 
     /// Get the vector type of the ExtractElementOp.
-    pub fn vector_type(&self, ctx: &Context) -> TypePtr<VectorType> {
+    pub fn vector_type(&self, ctx: &Context) -> TypedHandle<VectorType> {
         use pliron::r#type::Typed;
         let ty = self.get_operand_vector(ctx).get_type(ctx);
-        TypePtr::<VectorType>::from_ptr(ty, ctx)
+        TypedHandle::<VectorType>::from_handle(ty, ctx)
             .expect("ExtractElementOp vector operand type is not a VectorType")
     }
 }
@@ -3583,7 +3583,7 @@ impl Verify for FNegOp {
         let loc = self.loc(ctx);
         let op = &*self.op.deref(ctx);
         let arg_ty = op.get_operand(0).get_type(ctx);
-        if !type_impls::<dyn FloatTypeInterface>(&**arg_ty.deref(ctx)) {
+        if !type_impls::<dyn FloatTypeInterface>(&*arg_ty.deref(ctx)) {
             return verify_err!(loc, FNegOpVerifyErr::ArgumentMustBeFloat);
         }
         Ok(())
@@ -3743,8 +3743,8 @@ impl Verify for FCmpOp {
             verify_err!(loc.clone(), FCmpOpVerifyErr::PredAttrErr)?
         }
 
-        let res_ty: TypePtr<IntegerType> =
-            TypePtr::from_ptr(self.result_type(ctx), ctx).map_err(|mut err| {
+        let res_ty: TypedHandle<IntegerType> = TypedHandle::from_handle(self.result_type(ctx), ctx)
+            .map_err(|mut err| {
                 err.set_loc(loc.clone());
                 err
             })?;
@@ -3754,7 +3754,7 @@ impl Verify for FCmpOp {
         }
 
         let opd_ty = self.operand_type(ctx).deref(ctx);
-        if !(type_impls::<dyn FloatTypeInterface>(&**opd_ty)) {
+        if !(type_impls::<dyn FloatTypeInterface>(&*opd_ty)) {
             return verify_err!(loc, FCmpOpVerifyErr::IncorrectOperandsType);
         }
 
@@ -3790,7 +3790,7 @@ impl CallIntrinsicOp {
     pub fn new(
         ctx: &mut Context,
         intrinsic_name: StringAttr,
-        intrinsic_type: TypePtr<FuncType>,
+        intrinsic_type: TypedHandle<FuncType>,
         operands: Vec<Value>,
     ) -> Self {
         let res_ty = intrinsic_type.deref(ctx).result_type();
@@ -3871,7 +3871,7 @@ impl Parsable for CallIntrinsicOp {
         let (iname, fmf, operands, ftype) = parser.parse_stream(state_stream).into_result()?.0;
 
         let ctx = &mut state_stream.state.ctx;
-        let intr_ty = TypePtr::<FuncType>::from_ptr(ftype, ctx).map_err(|mut err| {
+        let intr_ty = TypedHandle::<FuncType>::from_handle(ftype, ctx).map_err(|mut err| {
             err.set_loc(pos);
             err
         })?;
@@ -3910,7 +3910,7 @@ impl Verify for CallIntrinsicOp {
 
         let Some(ty) = self
             .get_attr_llvm_intrinsic_type(ctx)
-            .and_then(|ty| TypePtr::<FuncType>::from_ptr(ty.get_type(ctx), ctx).ok())
+            .and_then(|ty| TypedHandle::<FuncType>::from_handle(ty.get_type(ctx), ctx).ok())
         else {
             return verify_err!(
                 self.loc(ctx),
@@ -3989,7 +3989,7 @@ impl Verify for VAArgOp {
 
 impl VAArgOp {
     /// Create a new [VAArgOp].
-    pub fn new(ctx: &mut Context, list: Value, ty: Ptr<TypeObj>) -> Self {
+    pub fn new(ctx: &mut Context, list: Value, ty: TypeHandle) -> Self {
         let op = Operation::new(
             ctx,
             Self::get_concrete_op_info(),
@@ -4021,7 +4021,7 @@ pub struct FuncOp;
 
 impl FuncOp {
     /// Create a new empty [FuncOp].
-    pub fn new(ctx: &mut Context, name: Identifier, ty: TypePtr<FuncType>) -> Self {
+    pub fn new(ctx: &mut Context, name: Identifier, ty: TypedHandle<FuncType>) -> Self {
         let ty_attr = TypeAttr::new(ty.into());
         let op = Operation::new(ctx, Self::get_concrete_op_info(), vec![], vec![], vec![], 0);
         let opop = FuncOp { op };
@@ -4032,11 +4032,11 @@ impl FuncOp {
     }
 
     /// Get the function signature (type).
-    pub fn get_type(&self, ctx: &Context) -> TypePtr<FuncType> {
+    pub fn get_type(&self, ctx: &Context) -> TypedHandle<FuncType> {
         let ty = attr_cast::<dyn TypedAttrInterface>(&*self.get_attr_llvm_func_type(ctx).unwrap())
             .unwrap()
             .get_type(ctx);
-        TypePtr::from_ptr(ty, ctx).unwrap()
+        TypedHandle::from_handle(ty, ctx).unwrap()
     }
 
     /// Get the entry block (if it exists) of this function.
@@ -4068,7 +4068,7 @@ impl FuncOp {
 }
 
 impl pliron::r#type::Typed for FuncOp {
-    fn get_type(&self, ctx: &Context) -> Ptr<TypeObj> {
+    fn get_type(&self, ctx: &Context) -> TypeHandle {
         self.get_type(ctx).into()
     }
 }

@@ -4,19 +4,19 @@ use pliron::{
     builtin::type_interfaces::FunctionTypeInterface,
     combine::{Parser, between, optional, token},
     common_traits::Verify,
-    context::{Context, Ptr},
+    context::Context,
     derive::{format, pliron_type, type_interface_impl},
     identifier::Identifier,
     input_err_noloc,
     irfmt::{
-        parsers::{delimited_list_parser, location, spaced},
+        parsers::{delimited_list_parser, location, spaced, type_parser},
         printers::{enclosed, list_with_sep},
     },
     location::Located,
     parsable::{IntoParseResult, Parsable, ParseResult, StateStream},
     printable::{self, ListSeparator, Printable},
     result::Result,
-    r#type::{Type, TypeObj, TypePtr},
+    r#type::{Type, TypeHandle, TypedHandle},
     verify_err_noloc,
 };
 use thiserror::Error;
@@ -37,7 +37,7 @@ use std::hash::Hash;
 #[derive(Debug)]
 pub struct StructType {
     name: Option<Identifier>,
-    fields: Option<Vec<Ptr<TypeObj>>>,
+    fields: Option<Vec<TypeHandle>>,
 }
 
 impl StructType {
@@ -52,10 +52,10 @@ impl StructType {
     /// It is not an error to provide `fields` as `None` even when
     /// the named struct already exists and has its body set.
     pub fn get_named(
-        ctx: &mut Context,
+        ctx: &Context,
         name: Identifier,
-        fields: Option<Vec<Ptr<TypeObj>>>,
-    ) -> Result<TypePtr<Self>> {
+        fields: Option<Vec<TypeHandle>>,
+    ) -> Result<TypedHandle<Self>> {
         let self_ptr = Type::register_instance(
             StructType {
                 name: Some(name.clone()),
@@ -65,7 +65,7 @@ impl StructType {
             ctx,
         );
         // Verify that we created a new or equivalent existing type.
-        let mut self_ref = self_ptr.to_ptr().deref_mut(ctx);
+        let mut self_ref = self_ptr.to_handle().deref_mut(ctx);
         let self_ref = self_ref.downcast_mut::<StructType>().unwrap();
         assert!(self_ref.name.as_ref().unwrap() == &name);
         if let Some(fields) = fields {
@@ -85,7 +85,7 @@ impl StructType {
 
     /// Get or create a new unnamed (anonymous) struct.
     /// These are finalized upon creation, and uniqued based on the fields.
-    pub fn get_unnamed(ctx: &mut Context, fields: Vec<Ptr<TypeObj>>) -> TypePtr<Self> {
+    pub fn get_unnamed(ctx: &Context, fields: Vec<TypeHandle>) -> TypedHandle<Self> {
         Type::register_instance(
             StructType {
                 name: None,
@@ -95,8 +95,8 @@ impl StructType {
         )
     }
 
-    /// If a named struct already exists, get a pointer to it.
-    pub fn get_existing_named(ctx: &Context, name: &Identifier) -> Option<TypePtr<Self>> {
+    /// If a named struct already exists, get a handle to it.
+    pub fn get_existing_named(ctx: &Context, name: &Identifier) -> Option<TypedHandle<Self>> {
         Type::get_instance(
             StructType {
                 name: Some(name.clone()),
@@ -107,8 +107,11 @@ impl StructType {
         )
     }
 
-    /// If an unnamed struct already exists, get a pointer to it.
-    pub fn get_existing_unnamed(ctx: &Context, fields: Vec<Ptr<TypeObj>>) -> Option<TypePtr<Self>> {
+    /// If an unnamed struct already exists, get a handle to it.
+    pub fn get_existing_unnamed(
+        ctx: &Context,
+        fields: Vec<TypeHandle>,
+    ) -> Option<TypedHandle<Self>> {
         Type::get_instance(
             StructType {
                 name: None,
@@ -134,7 +137,7 @@ impl StructType {
     }
 
     /// Get type of the idx'th field.
-    pub fn field_type(&self, field_idx: usize) -> Ptr<TypeObj> {
+    pub fn field_type(&self, field_idx: usize) -> TypeHandle {
         self.fields
             .as_ref()
             .expect("field_type shouldn't be called on opaque types")[field_idx]
@@ -149,7 +152,7 @@ impl StructType {
     }
 
     /// Get an iterator over the fields of this struct
-    pub fn fields(&self) -> impl Iterator<Item = Ptr<TypeObj>> + '_ {
+    pub fn fields(&self) -> impl Iterator<Item = TypeHandle> + '_ {
         self.fields
             .as_ref()
             .expect("fields shouldn't be called on opaque types")
@@ -250,7 +253,7 @@ impl PartialEq for StructType {
 
 impl Parsable for StructType {
     type Arg = ();
-    type Parsed = TypePtr<Self>;
+    type Parsed = TypedHandle<Self>;
 
     fn parse<'a>(
         state_stream: &mut StateStream<'a>,
@@ -261,7 +264,7 @@ impl Parsable for StructType {
     {
         let body_parser = || {
             // Parse multiple type annotated fields separated by ',', all of it delimited by braces.
-            delimited_list_parser('{', '}', ',', Ptr::<TypeObj>::parser(()))
+            delimited_list_parser('{', '}', ',', type_parser())
         };
 
         let named = spaced((location(), Identifier::parser(())))
@@ -324,13 +327,13 @@ impl PointerType {
 )]
 #[derive(Hash, PartialEq, Eq, Debug)]
 pub struct ArrayType {
-    elem: Ptr<TypeObj>,
+    elem: TypeHandle,
     size: u64,
 }
 
 impl ArrayType {
     /// Get array element type.
-    pub fn elem_type(&self) -> Ptr<TypeObj> {
+    pub fn elem_type(&self) -> TypeHandle {
         self.elem
     }
 
@@ -352,8 +355,8 @@ pub struct VoidType;
 )]
 #[derive(Hash, PartialEq, Eq, Debug)]
 pub struct FuncType {
-    res: Ptr<TypeObj>,
-    args: Vec<Ptr<TypeObj>>,
+    res: TypeHandle,
+    args: Vec<TypeHandle>,
     is_var_arg: bool,
 }
 
@@ -365,7 +368,7 @@ pub enum FuncTypeErr {
 
 impl FuncType {
     /// Result type
-    pub fn result_type(&self) -> Ptr<TypeObj> {
+    pub fn result_type(&self) -> TypeHandle {
         self.res
     }
 
@@ -377,10 +380,10 @@ impl FuncType {
 
 #[type_interface_impl]
 impl FunctionTypeInterface for FuncType {
-    fn arg_types(&self) -> Vec<Ptr<TypeObj>> {
+    fn arg_types(&self) -> Vec<TypeHandle> {
         self.args.clone()
     }
-    fn res_types(&self) -> Vec<Ptr<TypeObj>> {
+    fn res_types(&self) -> Vec<TypeHandle> {
         vec![self.res]
     }
 }
@@ -402,14 +405,14 @@ pub enum VectorTypeKind {
 )]
 #[derive(Hash, PartialEq, Eq, Debug)]
 pub struct VectorType {
-    elem_ty: Ptr<TypeObj>,
+    elem_ty: TypeHandle,
     num_elems: u32,
     kind: VectorTypeKind,
 }
 
 impl VectorType {
     /// Get the element type.
-    pub fn elem_type(&self) -> Ptr<TypeObj> {
+    pub fn elem_type(&self) -> TypeHandle {
         self.elem_ty
     }
 
@@ -437,7 +440,7 @@ mod tests {
     use pliron::{
         builtin::types::{IntegerType, Signedness},
         combine::{self, Parser, eof, token},
-        context::{Context, Ptr},
+        context::Context,
         derive::{pliron_type, verify_succ},
         identifier::Identifier,
         irfmt::parsers::{spaced, type_parser},
@@ -445,19 +448,19 @@ mod tests {
         parsable::{self, Parsable, ParseResult, StateStream, state_stream_from_iterator},
         printable::{self, Printable},
         result::Result,
-        r#type::{Type, TypeObj, TypePtr},
+        r#type::{Type, TypeHandle, TypedHandle},
     };
 
     #[test]
     fn test_struct() -> Result<()> {
-        let mut ctx = Context::new();
-        let int64_ptr = IntegerType::get(&mut ctx, 64, Signedness::Signless).into();
+        let ctx = Context::new();
+        let int64_ptr = IntegerType::get(&ctx, 64, Signedness::Signless).into();
         let linked_list_id: Identifier = "LinkedList".try_into().unwrap();
         let linked_list_2_id: Identifier = "LinkedList2".try_into().unwrap();
 
         // Create an opaque struct since we want a recursive type.
-        let list_struct: Ptr<TypeObj> =
-            StructType::get_named(&mut ctx, linked_list_id.clone(), None)?.into();
+        let list_struct: TypeHandle =
+            StructType::get_named(&ctx, linked_list_id.clone(), None)?.into();
         assert!(
             list_struct
                 .deref(&ctx)
@@ -465,10 +468,10 @@ mod tests {
                 .unwrap()
                 .is_opaque()
         );
-        let list_struct_ptr = TypedPointerType::get(&mut ctx, list_struct).into();
+        let list_struct_ptr = TypedPointerType::get(&ctx, list_struct).into();
         let fields = vec![int64_ptr, list_struct_ptr];
         // Set the struct body now.
-        StructType::get_named(&mut ctx, linked_list_id.clone(), Some(fields))?;
+        StructType::get_named(&ctx, linked_list_id.clone(), Some(fields))?;
         assert!(
             !list_struct
                 .deref(&ctx)
@@ -489,7 +492,7 @@ mod tests {
         );
 
         let head_fields = vec![int64_ptr, list_struct_ptr];
-        let head_struct = StructType::get_unnamed(&mut ctx, head_fields.clone());
+        let head_struct = StructType::get_unnamed(&ctx, head_fields.clone());
         let head_struct2 = StructType::get_existing_unnamed(&ctx, head_fields).unwrap();
         assert!(head_struct == head_struct2);
         assert!(StructType::get_existing_unnamed(&ctx, vec![int64_ptr, list_struct]).is_none());
@@ -504,17 +507,17 @@ mod tests {
     #[pliron_type(name = "llvm.typed_ptr", generate_get = true)]
     #[derive(Hash, PartialEq, Eq, Debug)]
     pub struct TypedPointerType {
-        to: Ptr<TypeObj>,
+        to: TypeHandle,
     }
 
     impl TypedPointerType {
-        /// Get, if it already exists, a pointer type.
-        pub fn get_existing(ctx: &Context, to: Ptr<TypeObj>) -> Option<TypePtr<Self>> {
+        /// Get, if it already exists, a handle to this typed pointer type.
+        pub fn get_existing(ctx: &Context, to: TypeHandle) -> Option<TypedHandle<Self>> {
             Type::get_instance(TypedPointerType { to }, ctx)
         }
 
         /// Get the pointee type.
-        pub fn get_pointee_type(&self) -> Ptr<TypeObj> {
+        pub fn get_pointee_type(&self) -> TypeHandle {
             self.to
         }
     }
@@ -532,7 +535,7 @@ mod tests {
 
     impl Parsable for TypedPointerType {
         type Arg = ();
-        type Parsed = TypePtr<Self>;
+        type Parsed = TypedHandle<Self>;
 
         fn parse<'a>(
             state_stream: &mut StateStream<'a>,
@@ -550,17 +553,17 @@ mod tests {
 
     #[test]
     fn test_pointer_types() {
-        let mut ctx = Context::new();
-        let int32_1_ptr = IntegerType::get(&mut ctx, 32, Signedness::Signed);
-        let int64_ptr = IntegerType::get(&mut ctx, 64, Signedness::Signed).into();
+        let ctx = Context::new();
+        let int32_1_ptr = IntegerType::get(&ctx, 32, Signedness::Signed);
+        let int64_ptr = IntegerType::get(&ctx, 64, Signedness::Signed).into();
 
         let int64pointer_ptr = TypedPointerType { to: int64_ptr };
-        let int64pointer_ptr = Type::register_instance(int64pointer_ptr, &mut ctx);
+        let int64pointer_ptr = Type::register_instance(int64pointer_ptr, &ctx);
         assert_eq!(
             int64pointer_ptr.disp(&ctx).to_string(),
             "llvm.typed_ptr <builtin.integer si64>"
         );
-        assert!(int64pointer_ptr == TypedPointerType::get(&mut ctx, int64_ptr));
+        assert!(int64pointer_ptr == TypedPointerType::get(&ctx, int64_ptr));
 
         assert!(
             int64_ptr
@@ -718,7 +721,7 @@ mod tests {
     fn test_functype_parsing() {
         let mut ctx = Context::new();
 
-        let si32 = IntegerType::get(&mut ctx, 32, Signedness::Signed);
+        let si32 = IntegerType::get(&ctx, 32, Signedness::Signed);
 
         let input = "llvm.func <llvm.void (builtin.integer si32) variadic = false>";
         let state_stream = state_stream_from_iterator(
@@ -729,7 +732,7 @@ mod tests {
         let res = type_parser().and(eof()).parse(state_stream).unwrap().0.0;
 
         let void_ty = VoidType::get(&ctx);
-        assert!(res == FuncType::get(&mut ctx, void_ty.to_ptr(), vec![si32.into()], false).into());
+        assert!(res == FuncType::get(&ctx, void_ty.to_handle(), vec![si32.into()], false).into());
         assert_eq!(input, &res.disp(&ctx).to_string());
     }
 }
