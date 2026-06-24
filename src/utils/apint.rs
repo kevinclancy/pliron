@@ -1160,11 +1160,15 @@ mod tests {
             0b1110
         );
         assert_eq!(
-            APInt::from_u8(0b1011, width).or(&APInt::zero(width)).to_u8(),
+            APInt::from_u8(0b1011, width)
+                .or(&APInt::zero(width))
+                .to_u8(),
             0b1011
         );
         assert_eq!(
-            APInt::from_u8(0b1011, width).or(&APInt::umax(width)).to_u8(),
+            APInt::from_u8(0b1011, width)
+                .or(&APInt::umax(width))
+                .to_u8(),
             0b1111
         );
     }
