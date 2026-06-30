@@ -305,10 +305,6 @@ fn check_fold_int_bin_op(
 
 /// Constant fold a binary floating-point operation into a singleton vector
 /// containing its result if both operands are constant, or None otherwise.
-///
-/// `combine` computes the result with the default IEEE rounding mode. Because
-/// the result type equals the operand type, the produced [FloatAttr] already
-/// carries the correct type.
 fn check_fold_float_bin_op(
     operand_attrs: &[Option<AttrObj>],
     combine: impl Fn(&dyn FloatAttr, &dyn FloatAttr) -> Box<dyn FloatAttr>,
