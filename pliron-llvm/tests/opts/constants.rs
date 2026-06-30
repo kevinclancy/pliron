@@ -1243,7 +1243,12 @@ fn fneg_folds_positive_infinity() -> Result<()> {
     "#;
     let (status, _before, after) = run_sccp_on_text(input)?;
     assert_eq!(status, IRStatus::Changed);
-    assert_eq!(after.matches("<builtin.single -Inf> : builtin.fp32").count(), 1);
+    assert_eq!(
+        after
+            .matches("<builtin.single -Inf> : builtin.fp32")
+            .count(),
+        1
+    );
     Ok(())
 }
 
@@ -1259,7 +1264,12 @@ fn fneg_folds_negative_infinity() -> Result<()> {
     "#;
     let (status, _before, after) = run_sccp_on_text(input)?;
     assert_eq!(status, IRStatus::Changed);
-    assert_eq!(after.matches("<builtin.single +Inf> : builtin.fp32").count(), 1);
+    assert_eq!(
+        after
+            .matches("<builtin.single +Inf> : builtin.fp32")
+            .count(),
+        1
+    );
     Ok(())
 }
 
@@ -1275,7 +1285,10 @@ fn fneg_folds_nan() -> Result<()> {
     "#;
     let (status, _before, after) = run_sccp_on_text(input)?;
     assert_eq!(status, IRStatus::Changed);
-    assert_eq!(after.matches("<builtin.single NaN> : builtin.fp32").count(), 2);
+    assert_eq!(
+        after.matches("<builtin.single NaN> : builtin.fp32").count(),
+        2
+    );
     Ok(())
 }
 
@@ -1328,7 +1341,12 @@ fn fadd_folds_infinity_and_finite() -> Result<()> {
     "#;
     let (status, _before, after) = run_sccp_on_text(input)?;
     assert_eq!(status, IRStatus::Changed);
-    assert_eq!(after.matches("<builtin.single +Inf> : builtin.fp32").count(), 2);
+    assert_eq!(
+        after
+            .matches("<builtin.single +Inf> : builtin.fp32")
+            .count(),
+        2
+    );
     Ok(())
 }
 
@@ -1345,7 +1363,10 @@ fn fadd_folds_opposite_infinities_to_nan() -> Result<()> {
     "#;
     let (status, _before, after) = run_sccp_on_text(input)?;
     assert_eq!(status, IRStatus::Changed);
-    assert_eq!(after.matches("<builtin.single NaN> : builtin.fp32").count(), 1);
+    assert_eq!(
+        after.matches("<builtin.single NaN> : builtin.fp32").count(),
+        1
+    );
     Ok(())
 }
 
@@ -1362,7 +1383,10 @@ fn fadd_folds_nan() -> Result<()> {
     "#;
     let (status, _before, after) = run_sccp_on_text(input)?;
     assert_eq!(status, IRStatus::Changed);
-    assert_eq!(after.matches("<builtin.single NaN> : builtin.fp32").count(), 2);
+    assert_eq!(
+        after.matches("<builtin.single NaN> : builtin.fp32").count(),
+        2
+    );
     Ok(())
 }
 
@@ -1415,7 +1439,12 @@ fn fsub_folds_finite_minus_infinity() -> Result<()> {
     "#;
     let (status, _before, after) = run_sccp_on_text(input)?;
     assert_eq!(status, IRStatus::Changed);
-    assert_eq!(after.matches("<builtin.single -Inf> : builtin.fp32").count(), 1);
+    assert_eq!(
+        after
+            .matches("<builtin.single -Inf> : builtin.fp32")
+            .count(),
+        1
+    );
     Ok(())
 }
 
@@ -1432,7 +1461,10 @@ fn fsub_folds_equal_infinities_to_nan() -> Result<()> {
     "#;
     let (status, _before, after) = run_sccp_on_text(input)?;
     assert_eq!(status, IRStatus::Changed);
-    assert_eq!(after.matches("<builtin.single NaN> : builtin.fp32").count(), 1);
+    assert_eq!(
+        after.matches("<builtin.single NaN> : builtin.fp32").count(),
+        1
+    );
     Ok(())
 }
 
@@ -1449,6 +1481,9 @@ fn fsub_folds_nan() -> Result<()> {
     "#;
     let (status, _before, after) = run_sccp_on_text(input)?;
     assert_eq!(status, IRStatus::Changed);
-    assert_eq!(after.matches("<builtin.single NaN> : builtin.fp32").count(), 2);
+    assert_eq!(
+        after.matches("<builtin.single NaN> : builtin.fp32").count(),
+        2
+    );
     Ok(())
 }

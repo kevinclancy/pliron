@@ -934,7 +934,11 @@ mod tests {
                 .unwrap_or_else(|e| panic!("{}\nError parsing {}", e.into_inner().error, s))
                 .0
         };
-        assert!(parsed.is_nan(), "Failed to round-trip NaN, got {}", parsed.disp(ctx));
+        assert!(
+            parsed.is_nan(),
+            "Failed to round-trip NaN, got {}",
+            parsed.disp(ctx)
+        );
         Ok(())
     }
 

@@ -5,7 +5,7 @@ use thiserror::Error;
 
 use pliron::{
     arg_err,
-    attribute::{Attribute, AttrObj, attr_cast},
+    attribute::{AttrObj, Attribute, attr_cast},
     basic_block::BasicBlock,
     builtin::{
         attr_interfaces::FloatAttr,
