@@ -105,9 +105,7 @@ pub fn float_parse<'a, T: Float>(
             .or(char::digit())
             .or(char::char('+'))
             .or(char::char('-'))
-            .or(char::char('.'))
-            .or(char::char('('))
-            .or(char::char(')')),
+            .or(char::char('.')),
     );
 
     let (f_str, _) = allowed_chars
