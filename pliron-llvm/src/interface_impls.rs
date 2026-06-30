@@ -5,9 +5,10 @@ use thiserror::Error;
 
 use pliron::{
     arg_err,
-    attribute::AttrObj,
+    attribute::{Attribute, AttrObj, attr_cast},
     basic_block::BasicBlock,
     builtin::{
+        attr_interfaces::FloatAttr,
         attributes::IntegerAttr,
         op_interfaces::{BranchOpInterface, OneResultInterface},
         types::{IntegerType, Signedness},
@@ -299,6 +300,29 @@ fn check_fold_int_bin_op(
         lhs.get_type(),
         combine(&lhs.value(), &rhs.value()),
     )) as AttrObj;
+    vec![Some(res)]
+}
+
+/// Constant fold a binary floating-point operation into a singleton vector
+/// containing its result if both operands are constant, or None otherwise.
+///
+/// `combine` computes the result with the default IEEE rounding mode. Because
+/// the result type equals the operand type, the produced [FloatAttr] already
+/// carries the correct type.
+fn check_fold_float_bin_op(
+    operand_attrs: &[Option<AttrObj>],
+    combine: impl Fn(&dyn FloatAttr, &dyn FloatAttr) -> Box<dyn FloatAttr>,
+) -> Vec<Option<AttrObj>> {
+    assert!(operand_attrs.len() == 2);
+    let [Some(lhs), Some(rhs)] = operand_attrs else {
+        return vec![None];
+    };
+    let lhs = attr_cast::<dyn FloatAttr>(&**lhs)
+        .expect("invalid operand type: typecheck before optimizing");
+    let rhs = attr_cast::<dyn FloatAttr>(&**rhs)
+        .expect("invalid operand type: typecheck before optimizing");
+    let res = combine(lhs, rhs);
+    let res = pliron::dyn_clone::clone_box(&*res as &dyn Attribute);
     vec![Some(res)]
 }
 
@@ -678,6 +702,58 @@ impl ConstFoldInterface for ZExtOp {
             value.zext(NonZero::new(dest_width as usize).expect("result has zero bitwidth"));
         let res = Box::new(IntegerAttr::new(dest_ty, extended)) as AttrObj;
         vec![Some(res)]
+    }
+    fn fold_in_place(
+        &self,
+        ctx: &mut Context,
+        ops: &[Option<AttrObj>],
+        rw: &mut dyn Rewriter,
+    ) -> IRStatus {
+        self.fold_with_materialization(ctx, ops, rw)
+    }
+}
+
+#[op_interface_impl]
+impl ConstFoldInterface for FNegOp {
+    fn check_fold(&self, _ctx: &Context, ops: &[Option<AttrObj>]) -> Vec<Option<AttrObj>> {
+        let [Some(operand)] = ops else {
+            return vec![None];
+        };
+        let float_val = attr_cast::<dyn FloatAttr>(&**operand)
+            .expect("invalid operand type: typecheck before optimizing");
+        let negated = float_val.neg();
+        let res = pliron::dyn_clone::clone_box(&*negated as &dyn Attribute);
+        vec![Some(res)]
+    }
+    fn fold_in_place(
+        &self,
+        ctx: &mut Context,
+        ops: &[Option<AttrObj>],
+        rw: &mut dyn Rewriter,
+    ) -> IRStatus {
+        self.fold_with_materialization(ctx, ops, rw)
+    }
+}
+
+#[op_interface_impl]
+impl ConstFoldInterface for FAddOp {
+    fn check_fold(&self, _ctx: &Context, ops: &[Option<AttrObj>]) -> Vec<Option<AttrObj>> {
+        check_fold_float_bin_op(ops, |lhs, rhs| lhs.add(rhs).value)
+    }
+    fn fold_in_place(
+        &self,
+        ctx: &mut Context,
+        ops: &[Option<AttrObj>],
+        rw: &mut dyn Rewriter,
+    ) -> IRStatus {
+        self.fold_with_materialization(ctx, ops, rw)
+    }
+}
+
+#[op_interface_impl]
+impl ConstFoldInterface for FSubOp {
+    fn check_fold(&self, _ctx: &Context, ops: &[Option<AttrObj>]) -> Vec<Option<AttrObj>> {
+        check_fold_float_bin_op(ops, |lhs, rhs| lhs.sub(rhs).value)
     }
     fn fold_in_place(
         &self,
