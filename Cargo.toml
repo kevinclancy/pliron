@@ -33,22 +33,22 @@ pliron-derive = { path = "./pliron-derive", version = "0" }
 
 awint.workspace = true
 rustc_apfloat.workspace = true
-slotmap = "1"
-once_vec = "0"
-downcast-rs = "2"
 rustc-hash.workspace = true
 thiserror.workspace = true
 combine.workspace = true
-regex = "1"
-dyn-clone.workspace = true
 log.workspace = true
 hi_sparse_bitset.workspace = true
-hashbrown.workspace = true
-spin.workspace = true
+slotmap.workspace = true
+once_vec.workspace = true
+downcast-rs.workspace = true
+regex.workspace = true
+dyn-clone.workspace = true
+
+hashbrown = "0"
+spin = "0"
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 inventory = "0"
-
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 linkme = "0"
 
@@ -69,7 +69,6 @@ bitflags = "2"
 rustc_apfloat = "0.2"
 assert_cmd = "2"
 clap = { version = "4", features = ["derive"] }
-dyn-clone = "1"
 expect-test = "1"
 proc-macro2 = "1"
 quote = "1"
@@ -78,14 +77,17 @@ rustc-hash = "2"
 combine = "4"
 thiserror = "2"
 tempfile = "3"
-log = { version = "0", features = ["release_max_level_info"]  }
+log = { version = "0", features = ["release_max_level_info"] }
 env_logger = "0"
 cargo-manifest = "0"
 which = "8"
 hi_sparse_bitset = "0"
-hashbrown = "0.17"
-spin = "0.12"
 utf8-chars = "3"
+slotmap = "1"
+once_vec = "0"
+downcast-rs = "2"
+regex = "1"
+dyn-clone = "1"
 
 [[example]]
 name = "kaleidoscope"
